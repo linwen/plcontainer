@@ -1,0 +1,683 @@
+################################################################################
+#################################### GROUPS ####################################
+################################################################################
+
+groups:
+- name: plcontainer
+  jobs:
+  - plcontainer_build_centos6
+  - plcontainer_build_centos7
+  - plcontainer_build_python_image
+  - plcontainer_build_r_image
+  - plcontainer_function_test_centos6
+  - plcontainer_perf_test_centos6
+  - plcontainer_function_test_centos7
+  - plcontainer_perf_test_centos7
+
+################################################################################
+################################## RESOURCES ###################################
+################################################################################
+ccp_create_params_anchor: &ccp_default_params
+  action: create
+  delete_on_failure: true
+  generate_random_name: true
+  terraform_source: ccp_src/aws/
+
+ccp_gen_cluster_default_params_anchor: &ccp_gen_cluster_default_params
+  AWS_ACCESS_KEY_ID: {{tf-machine-access-key-id}}
+  AWS_SECRET_ACCESS_KEY: {{tf-machine-secret-access-key}}
+  AWS_DEFAULT_REGION: {{aws-region}}
+  BUCKET_PATH: {{tf-bucket-path-plcontainer}}
+  BUCKET_NAME: {{tf-bucket-name}}
+
+ccp_options_anchor6: &ccp_options6
+  terraform_source: ccp_src/aws/
+  vars:
+    aws_instance-node-instance_type: t2.large
+    platform: centos6
+    aws_ebs_volume_type: standard
+
+ccp_destroy_anchor6: &ccp_destroy6
+  put: terraform
+  tags: ["ccp"]
+  params:
+    action: destroy
+    env_name_file: terraform/name
+    <<: *ccp_options6
+  get_params:
+    action: destroy
+
+debug_sleep_anchor6: &debug_sleep6
+  do:
+  - task: debug_sleep
+    config:
+      platform: linux
+      image_resource:
+        type: docker-image
+        source:
+          repository: alpine
+          tag: latest
+      run:
+        path: 'sh'
+        args: ['-c', 'sleep 2h']
+    ensure:
+      <<: *ccp_destroy6
+
+
+ccp_options_anchor7: &ccp_options7
+  terraform_source: ccp_src/aws/
+  vars:
+    aws_instance-node-instance_type: t2.large
+    platform: centos7
+    aws_ebs_volume_type: standard
+
+ccp_destroy_anchor7: &ccp_destroy7
+  put: terraform
+  tags: ["ccp"]
+  params:
+    action: destroy
+    env_name_file: terraform/name
+    <<: *ccp_options7
+  get_params:
+    action: destroy
+
+debug_sleep_anchor7: &debug_sleep7
+  do:
+  - task: debug_sleep
+    tags: ["ccp"]
+    config:
+      platform: linux
+      image_resource:
+        type: docker-image
+        source:
+          repository: alpine
+          tag: latest
+      run:
+        path: 'sh'
+        args: ['-c', 'sleep 2h']
+    ensure:
+      <<: *ccp_destroy7
+## ======================================================================
+## resource types
+## ======================================================================
+
+resource_types:
+- name: terraform
+  type: docker-image
+  source:
+    repository: ljfranklin/terraform-resource
+
+resources:
+
+# Github Source Codes
+- name: data-science-bundle
+  type: git
+  source:
+    branch: master
+    private_key: {{plpkg-git-key}}
+    uri: git@github.com:greenplum-db/data-science-bundle.git
+
+- name: ccp_src
+  type: git
+  source:
+    branch: {{ccp-git-branch}}
+    private_key: {{ccp-git-key}}
+    uri: {{ccp-git-remote}}
+    tag_filter: {{ccp-tag-filter}}
+
+- name: plcontainer_src
+  type: git
+  source:
+    branch: master
+    uri: https://github.com/greenplum-db/plcontainer.git
+    tag_filter: 1.*
+
+- name: gpdb_src
+  type: git
+  source:
+    branch: {{gpdb-git-branch}}
+    uri: {{gpdb-git-remote}}
+    ignore_paths:
+    - gpdb-doc/*
+    - README*
+
+- name: terraform
+  type: terraform
+  source:
+    env:
+      AWS_ACCESS_KEY_ID: {{tf-machine-access-key-id}}
+      AWS_SECRET_ACCESS_KEY: {{tf-machine-secret-access-key}}
+    storage:
+      access_key_id: {{tf-machine-access-key-id}}
+      secret_access_key: {{tf-machine-secret-access-key}}
+      region_name: {{aws-region}}
+      # This is not parameterized, on purpose. All tfstates will go to this spot,
+      # and different teams will place there clusters' tfstate files under different paths
+      bucket: gpdb5-pipeline-dynamic-terraform
+      ###########################################################
+      # Two conventions are allowed for bucket_path:            #
+      # 1) Cluster are expected to be destroyed automatically   #
+      #    Toolsmiths will reap old and orphaned clusters       #
+      #                                                         #
+      #      bucket_path: prod/[Pipeline Name]/                 #
+      #                                                         #
+      # 2) Long lived clusters for development.                 #
+      #    The team that creates it is responsible for cluster  #
+      #                                                         #
+      #     bucket_path: dev/[Team Name]/                       #
+      #                                                         #
+      ###########################################################
+      bucket_path: {{tf-bucket-path-plcontainer}}
+
+# Docker images
+
+- name: centos-gpdb-dev-6
+  type: docker-image
+  source:
+    repository: pivotaldata/centos-gpdb-dev
+    tag: '6-gcc6.2-llvm3.7'
+
+- name: centos-gpdb-dev-7
+  type: docker-image
+  source:
+    repository: pivotaldata/centos-gpdb-dev
+    tag: 7-gcc6.2-llvm3.7
+
+# S3 Input and intermediate binaries
+
+- name: pl_perf_pl1
+  type: s3
+  source:
+    access_key_id: {{bucket-access-key-id}}
+    bucket: {{pl-bucket-name}}
+    region_name: {{aws-region}}
+    secret_access_key: {{bucket-secret-access-key}}
+    versioned_file: plperf/perf_pl1
+
+- name: pl_perf_py1
+  type: s3
+  source:
+    access_key_id: {{bucket-access-key-id}}
+    bucket: {{pl-bucket-name}}
+    region_name: {{aws-region}}
+    secret_access_key: {{bucket-secret-access-key}}
+    versioned_file: plperf/perf_py1
+
+- name: plr_gpdb5_centos6_build
+  type: s3
+  source:
+    bucket: {{pl-bucket-name}}
+    region_name: {{aws-region}}
+    access_key_id: {{bucket-access-key-id}}
+    secret_access_key: {{bucket-secret-access-key}}
+    versioned_file: release/gpdb5/plr/plr-2.3.2-gp5-rhel6-x86_64.gppkg
+- name: plr_gpdb5_centos7_build
+  type: s3
+  source:
+    bucket: {{pl-bucket-name}}
+    region_name: {{aws-region}}
+    access_key_id: {{bucket-access-key-id}}
+    secret_access_key: {{bucket-secret-access-key}}
+    versioned_file: release/gpdb5/plr/plr-2.3.2-gp5-rhel7-x86_64.gppkg
+
+- name: openssl
+  type: s3
+  source:
+    access_key_id: {{artifact-bucket-access-key-id}}
+    bucket: toolsmiths-concourse-artifacts
+    region_name: {{aws-region}}
+    secret_access_key: {{artifact-bucket-secret-access-key}}
+    versioned_file: gpdb-ext-release-local/OpenSSL/openssl/1.0.2l/targzs/openssl-rhel7_x86_64-1.0.2l.targz
+
+- name: python-gp5
+  type: s3
+  source:
+    access_key_id: {{artifact-bucket-access-key-id}}
+    bucket: toolsmiths-concourse-artifacts
+    region_name: {{aws-region}}
+    secret_access_key: {{artifact-bucket-secret-access-key}}
+    versioned_file: gpdb-ext-release-local/Python/python-gpdb5/2.7.12/targzs/python-rhel7_x86_64-2.7.12.targz
+
+- name: datascience-python-gp5
+  type: s3
+  source:
+    access_key_id: {{bucket-access-key-id}}
+    bucket: {{pl-bucket-name}}
+    region_name: {{aws-region}}
+    secret_access_key: {{bucket-secret-access-key}}
+    versioned_file: release/gpdb5/data-science/DataSciencePython-1.1.1-gp5-rhel7-x86_64.gppkg
+
+- name: r-gp5
+  type: s3
+  source:
+    access_key_id: {{bucket-access-key-id}}
+    bucket: {{pl-bucket-name}}
+    region_name: {{aws-region}}
+    secret_access_key: {{bucket-secret-access-key}}
+    versioned_file: build/gpdb5/r/bin_r_centos7.tar.gz
+
+- name: datascience-r-gp5
+  type: s3
+  source:
+    access_key_id: {{bucket-access-key-id}}
+    bucket: {{pl-bucket-name}}
+    region_name: {{aws-region}}
+    secret_access_key: {{bucket-secret-access-key}}
+    versioned_file: release/gpdb5/data-science/DataScienceR-1.0.1-gp5-rhel7-x86_64.gppkg
+
+- name: plcontainer_docker_image_centos_python
+  type: s3
+  source:
+    access_key_id: {{bucket-access-key-id}}
+    bucket: {{pl-bucket-name}}
+    region_name: {{aws-region}}
+    secret_access_key: {{bucket-secret-access-key}}
+    regexp: release/gpdb5/plcontainer/plcontainer-python-image(.*).tar.gz
+
+- name: plcontainer_docker_image_centos_r
+  type: s3
+  source:
+    access_key_id: {{bucket-access-key-id}}
+    bucket: {{pl-bucket-name}}
+    region_name: {{aws-region}}
+    secret_access_key: {{bucket-secret-access-key}}
+    regexp: release/gpdb5/plcontainer/plcontainer-r-image(.*).tar.gz
+
+- name: bin_gpdb_centos7
+  type: s3
+  source:
+    access_key_id: {{bucket-access-key-id}}
+    bucket: {{bucket-name}}
+    region_name: {{aws-region}}
+    secret_access_key: {{bucket-secret-access-key}}
+    versioned_file: {{bin_gpdb_centos7_versioned_file}}
+
+- name: bin_gpdb_centos6
+  type: s3
+  source:
+    access_key_id: {{bucket-access-key-id}}
+    bucket: {{bucket-name}}
+    region_name: {{aws-region}}
+    secret_access_key: {{bucket-secret-access-key}}
+    versioned_file: {{bin_gpdb_centos_versioned_file}}
+
+- name: plcontainer_gpdb_centos7_build
+  type: s3
+  source:
+    bucket: {{pl-bucket-name}}
+    region_name: {{aws-region}}
+    access_key_id: {{bucket-access-key-id}}
+    secret_access_key: {{bucket-secret-access-key}}
+    regexp: release/gpdb5/plcontainer/plcontainer-(.*)-rhel7-x86_64.gppkg
+
+- name: plcontainer_gpdb_centos6_build
+  type: s3
+  source:
+    bucket: {{pl-bucket-name}}
+    region_name: {{aws-region}}
+    access_key_id: {{bucket-access-key-id}}
+    secret_access_key: {{bucket-secret-access-key}}
+    regexp: release/gpdb5/plcontainer/plcontainer-(.*)-rhel6-x86_64.gppkg
+
+
+
+##################################### JOBS #####################################
+################################################################################
+
+jobs:
+
+# Build PL/Container GP Package
+- name: plcontainer_build_centos6
+  max_in_flight: 4
+  plan:
+  - aggregate:
+    - get: bin_gpdb_centos6
+    - get: gpdb_src
+    - get: plcontainer_src
+      trigger: true
+    - get: centos-gpdb-dev-6
+    - get: plr
+      resource: plr_gpdb5_centos6_build
+  - task: plcontainer_gpdb_build
+    file: plcontainer_src/concourse/tasks/plcontainer_build.yml
+    image: centos-gpdb-dev-6
+    params:
+      DEV_RELEASE: release
+    input_mapping:
+      bin_gpdb: bin_gpdb_centos6
+  - aggregate:
+    - put: plcontainer_gpdb_centos6_build
+      params:
+        file: plcontainer_gpdb_build/plcontainer*.gppkg
+
+- name: plcontainer_build_centos7
+  max_in_flight: 4
+  plan:
+  - aggregate:
+    - get: bin_gpdb_centos7
+    - get: gpdb_src
+    - get: plcontainer_src
+      trigger: true
+    - get: centos-gpdb-dev-7
+    - get: plr
+      resource: plr_gpdb5_centos7_build
+  - task: plcontainer_gpdb_build
+    file: plcontainer_src/concourse/tasks/plcontainer_build.yml
+    image: centos-gpdb-dev-7
+    params:
+      DEV_RELEASE: release
+    input_mapping:
+      bin_gpdb: bin_gpdb_centos7
+  - aggregate:
+    - put: plcontainer_gpdb_centos7_build
+      params:
+        file: plcontainer_gpdb_build/plcontainer*.gppkg
+
+
+- name: plcontainer_function_test_centos6
+  plan:
+  - aggregate:
+    - get: plcontainer_src
+      passed:
+      - plcontainer_build_centos6
+    - get: gpdb_src
+    - get: gpdb_binary
+      resource: bin_gpdb_centos6
+    - get: ccp_src
+      passed: [plcontainer_build_python_image, plcontainer_build_r_image]
+    - get: centos-gpdb-dev-6
+    - get: plcontainer_pyclient_docker_image
+      resource: plcontainer_docker_image_centos_python
+      passed: [plcontainer_build_python_image]
+      trigger: true
+    - get: plcontainer_rclient_docker_image
+      resource: plcontainer_docker_image_centos_r
+      passed: [plcontainer_build_r_image]
+      trigger: true
+    - get: plcontainer_gpdb_centos6_build
+      passed: [plcontainer_build_centos6]
+      trigger: true
+  - put: terraform
+    params:
+      <<: *ccp_default_params
+      vars:
+        aws_instance-node-instance_type: t2.large
+        platform: centos6
+  - task: gen_cluster
+    tags: ["ccp"]
+    file: ccp_src/ci/tasks/gen_cluster.yml
+    params:
+      <<: *ccp_gen_cluster_default_params
+      platform: centos6
+    on_failure:
+      <<: *ccp_destroy6
+  - task: plcontainer
+    tags: ["ccp"]
+    file: plcontainer_src/concourse/tasks/plcontainer_tests.yml
+    params:
+      platform: centos6
+    image: centos-gpdb-dev-6
+    input_mapping:
+      plcontainer_gpdb_build: plcontainer_gpdb_centos6_build
+    on_failure:
+      <<: *debug_sleep6
+  - *ccp_destroy6
+
+
+
+- name: plcontainer_perf_test_centos6
+  plan:
+  - aggregate:
+    - get: plcontainer_src
+      passed:
+      - plcontainer_function_test_centos6
+    - get: gpdb_src
+    - get: gpdb_binary
+      resource: bin_gpdb_centos6
+    - get: ccp_src
+      passed:
+      - plcontainer_function_test_centos6
+    - get: centos-gpdb-dev-6
+    - get: plcontainer_pyclient_docker_image
+      resource: plcontainer_docker_image_centos_python
+      passed: [plcontainer_function_test_centos6]
+    - get: plcontainer_rclient_docker_image
+      resource: plcontainer_docker_image_centos_r
+      passed: [plcontainer_function_test_centos6]
+    - get: plcontainer_gpdb_centos6_build
+      passed: [plcontainer_function_test_centos6]
+  - put: terraform
+    params:
+      <<: *ccp_default_params
+      vars:
+        aws_instance-node-instance_type: t2.medium
+        platform: centos6
+  - task: gen_cluster
+    tags: ["ccp"]
+    file: ccp_src/ci/tasks/gen_cluster.yml
+    params:
+      <<: *ccp_gen_cluster_default_params
+      platform: centos6
+    on_failure:
+      <<: *ccp_destroy6
+  - task: plcontainer
+    tags: ["ccp"]
+    file: plcontainer_src/concourse/tasks/plcontainer_perf.yml
+    params:
+      platform: centos6
+    image: centos-gpdb-dev-6
+    input_mapping:
+      plcontainer_gpdb_build: plcontainer_gpdb_centos6_build
+    on_failure:
+      <<: *debug_sleep6
+  - aggregate:
+    - put: pl_perf_pl1
+      params:
+        file: plcontainer_perf_result/perf_pl1
+    - put: pl_perf_py1
+      params:
+        file: plcontainer_perf_result/perf_py1
+  - *ccp_destroy6
+
+
+
+- name: plcontainer_function_test_centos7
+  plan:
+  - aggregate:
+    - get: plcontainer_src
+      passed:
+      - plcontainer_build_centos7
+    - get: gpdb_src
+    - get: gpdb_binary
+      resource: bin_gpdb_centos7
+    - get: ccp_src
+      passed: [plcontainer_build_python_image, plcontainer_build_r_image]
+    - get: centos-gpdb-dev-7
+    - get: plcontainer_pyclient_docker_image
+      resource: plcontainer_docker_image_centos_python
+      passed: [plcontainer_build_python_image]
+      trigger: true
+    - get: plcontainer_rclient_docker_image
+      resource: plcontainer_docker_image_centos_r
+      passed: [plcontainer_build_r_image]
+      trigger: true
+    - get: plcontainer_gpdb_centos7_build
+      passed: [plcontainer_build_centos7]
+      trigger: true
+  - put: terraform
+    params:
+      <<: *ccp_default_params
+      vars:
+        aws_instance-node-instance_type: t2.large
+        platform: centos7
+  - task: gen_cluster
+    tags: ["ccp"]
+    file: ccp_src/ci/tasks/gen_cluster.yml
+    params:
+      <<: *ccp_gen_cluster_default_params
+      platform: centos7
+    on_failure:
+      <<: *ccp_destroy7
+  - task: plcontainer
+    tags: ["ccp"]
+    file: plcontainer_src/concourse/tasks/plcontainer_tests.yml
+    params:
+      platform: centos7
+    image: centos-gpdb-dev-7
+    input_mapping:
+      plcontainer_gpdb_build: plcontainer_gpdb_centos7_build
+    on_failure:
+      <<: *debug_sleep7
+  - *ccp_destroy7
+
+
+
+- name: plcontainer_perf_test_centos7
+  plan:
+  - aggregate:
+    - get: plcontainer_src
+      passed:
+      - plcontainer_function_test_centos7
+    - get: gpdb_src
+    - get: gpdb_binary
+      resource: bin_gpdb_centos7
+    - get: ccp_src
+      passed:
+      - plcontainer_function_test_centos7
+    - get: centos-gpdb-dev-7
+    - get: plcontainer_pyclient_docker_image
+      resource: plcontainer_docker_image_centos_python
+      passed: [plcontainer_function_test_centos7]
+    - get: plcontainer_rclient_docker_image
+      resource: plcontainer_docker_image_centos_r
+      passed: [plcontainer_function_test_centos7]
+    - get: plcontainer_gpdb_centos7_build
+      passed: [plcontainer_function_test_centos7]
+  - put: terraform
+    params:
+      <<: *ccp_default_params
+      vars:
+        aws_instance-node-instance_type: t2.medium
+        platform: centos7
+  - task: gen_cluster
+    tags: ["ccp"]
+    file: ccp_src/ci/tasks/gen_cluster.yml
+    params:
+      <<: *ccp_gen_cluster_default_params
+      platform: centos7
+    on_failure:
+      <<: *ccp_destroy7
+  - task: plcontainer
+    tags: ["ccp"]
+    file: plcontainer_src/concourse/tasks/plcontainer_perf.yml
+    params:
+      platform: centos7
+    image: centos-gpdb-dev-7
+    input_mapping:
+      plcontainer_gpdb_build: plcontainer_gpdb_centos7_build
+    on_failure:
+      <<: *debug_sleep7
+  - aggregate:
+    - put: pl_perf_pl1
+      params:
+        file: plcontainer_perf_result/perf_pl1
+    - put: pl_perf_py1
+      params:
+        file: plcontainer_perf_result/perf_py1
+  - *ccp_destroy7
+
+
+
+- name: plcontainer_build_python_image
+  plan:
+  - aggregate:
+    - get: plcontainer_src
+      trigger: true
+    - get: gpdb_src
+    - get: gpdb_binary
+      resource: bin_gpdb_centos6
+    - get: ccp_src
+    - get: centos-gpdb-dev-6
+    - get: data-science-bundle
+    - get: python
+      resource: python-gp5
+    - get: datascience
+      resource: datascience-python-gp5
+    - get: openssl
+  - put: terraform
+    params:
+      <<: *ccp_default_params
+      vars:
+        aws_instance-node-instance_type: t2.medium
+        platform: centos7
+  - task: gen_cluster
+    tags: ["ccp"]
+    file: ccp_src/ci/tasks/gen_cluster.yml
+    params:
+      <<: *ccp_gen_cluster_default_params
+      platform: centos7
+    on_failure:
+      <<: *ccp_destroy7
+  - task: docker_build
+    tags: ["ccp"]
+    file: plcontainer_src/concourse/tasks/docker_build_python.yml
+    params:
+      DEV_RELEASE: release
+      platform: centos7
+      language: python
+    image: centos-gpdb-dev-6
+    input_mapping:
+      plcontainer_gpdb_build: plcontainer_gpdb_centos6_build
+    on_failure:
+      <<: *debug_sleep7
+  - put: plcontainer_docker_image_centos_python
+    params:
+      file: plcontainer_docker_image/plcontainer*.tar.gz
+  - *ccp_destroy7
+
+
+- name: plcontainer_build_r_image
+  plan:
+  - aggregate:
+    - get: plcontainer_src
+      trigger: true
+    - get: gpdb_src
+    - get: gpdb_binary
+      resource: bin_gpdb_centos6
+    - get: ccp_src
+    - get: centos-gpdb-dev-6
+    - get: data-science-bundle
+    - get: r
+      resource: r-gp5
+    - get: datascience
+      resource: datascience-r-gp5
+  - put: terraform
+    params:
+      <<: *ccp_default_params
+      vars:
+        aws_instance-node-instance_type: t2.medium
+        platform: centos7
+  - task: gen_cluster
+    tags: ["ccp"]
+    file: ccp_src/ci/tasks/gen_cluster.yml
+    params:
+      <<: *ccp_gen_cluster_default_params
+      platform: centos7
+    on_failure:
+      <<: *ccp_destroy7
+  - task: docker_build
+    tags: ["ccp"]
+    file: plcontainer_src/concourse/tasks/docker_build_r.yml
+    params:
+      DEV_RELEASE: release
+      platform: centos7
+      language: r
+    image: centos-gpdb-dev-6
+    input_mapping:
+      plcontainer_gpdb_build: plcontainer_gpdb_centos6_build
+    on_failure:
+      <<: *debug_sleep7
+  - put: plcontainer_docker_image_centos_r
+    params:
+     file: plcontainer_docker_image/plcontainer*.tar.gz
+  - *ccp_destroy7

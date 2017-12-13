@@ -1,0 +1,14 @@
+Pkgname: plcontainer
+Architecture: #arch
+OS: #os
+Version: #plcver
+GPDBVersion: #gpver
+Description: Provides PL/Container procedural language implementation for the Greenplum Database.
+PostInstall:
+- Master: "echo '-';
+          echo '==========================================================================';
+          echo 'PL/Container installation is complete! To proceed, follow these steps:';
+          echo '1. Source your new $GPHOME/greenplum_path.sh file and restart the database.';
+          echo '2. Enable PL/Container language in one of your databases by running \"psql -f $GPHOME/share/postgresql/plcontainer/plcontainer_install.sql -d mydatabase\"';
+          echo '3. Install docker images on master node, for example install python image by running \"plcontainer install -n plc_python_shared -i plcontainer-python-images.tar.gz -c pivotaldata/plcontainer_python_shared:devel -l python;\" Refer to the installation guide for options';
+          echo '==========================================================================';"

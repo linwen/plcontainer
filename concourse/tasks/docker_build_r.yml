@@ -1,0 +1,18 @@
+platform: linux
+image_resource:
+  type: docker-image
+inputs:
+  - name: plcontainer_src
+  - name: ccp_src
+  - name: cluster_env_files
+  - name: r
+  - name: datascience
+  - name: data-science-bundle
+outputs:
+  - name: plcontainer_docker_image
+params:
+  platform:
+  language:
+  DEV_RELEASE: devel
+run:
+  path: plcontainer_src/concourse/scripts/plcontainer_docker_build.sh
